@@ -1,12 +1,13 @@
 from flask import Flask, jsonify, request
+import json
 
 app = Flask(__name__)
-
-accounts = [{'account_id': 12345, 'balance': 1200}, {'account_id': 23456, 'balance': 1700}, {'account_id': 45678, 'balance': 2400}, {'account_id': 100, 'balance': 20}]
+accounts = []
 
 # Reset API
 @app.route('/reset', methods=['POST'])
 def reset():
+    accounts = []
     return "OK", 200
 
 # Find Account by ID
@@ -19,55 +20,70 @@ def get_accounts():
     return jsonify(accounts), 200
 
 # Get Account balance
-@app.route('/balance/<int:id>', methods=['GET'])
-def get_balance(id):
-    account = get_account(id)
-    if account is None:
-        return "0", 404
-    return str(account["balance"]), 200
+@app.route('/balance', methods=['GET'])
+def get_balance():
+    if request.method == 'GET':
+        id = int(request.args.get("account_id"))
+        account = get_account(id)
+        if account is None:
+            return "0", 404
+        return str(account["balance"]), 200
 
-# Create or deposit
-@app.route('/deposit/<int:id>/<int:balance>', methods=['POST'])
-def deposit(id, balance):
-    account = get_account(id)
-    if account is None:
-        accounts.append({id:balance})
-        return jsonify({"destination": {"id": id, "balance": balance}}), 201
+@app.route('/event', methods=['POST'])
+def get_event():
+    reset()
+    requestData = json.loads(request.data)
+    eventType = requestData["type"]
 
-    newBalance = (balance+account["balance"])
-    account.update({"balance": newBalance})
-    return jsonify({"destination": {"id": id, "balance": newBalance}}), 201
-
-
-# Withdraw from existing and non-existing account
-@app.route('/withdraw/<int:id>/<int:amount>', methods=['POST'])
-def withdraw(id, amount):
-    account = get_account(id)
-    if account is None:
-        return "0", 404
-
-    newBalance = (account["balance"] - amount)
-    account.update({"balance": newBalance})
-    return jsonify({"destination": {"id": id, "balance": newBalance}}), 201
+    # Deposit existing and non-existing account
+    if eventType.lower() == 'deposit':
+        id = int(requestData["destination"])
+        amount = int(requestData["amount"])
+        account = get_account(id)
+        if account is None:
+            accounts.append({'account_id': id, 'balance': amount})
+            return '{"destination": {"id":"'+str(id)+'", "balance":'+str(amount)+'}}', 201
 
 
-# Transfer from existing and non-existing account
-@app.route('/transfer/<int:id>/<int:amount>/<int:destination>', methods=['POST'])
-def transfer(id, amount, destination):
-    account = get_account(id)
-    if account is None:
-        return "0", 404
+        newBalance = (amount + account["balance"])
+        account.update({"balance": newBalance})
+        return '{"destination": {"id":"'+str(id)+'", "balance":'+str(newBalance)+'}}', 201
 
-    newBalance = (account["balance"] - amount)
-    account.update({"balance": newBalance})
+    # Withdraw from existing and non-existing account
+    elif eventType.lower() == 'withdraw':
+        id = int(requestData["origin"])
+        account = get_account(id)
+        if account is None:
+            return "0", 404
 
-    destinAccount = get_account(destination)
-    if destinAccount is None:
-        accounts.append({id: amount})
-        return jsonify({"destination": {"id": destination, "balance": amount}}), 201
+        amount = int(requestData["amount"])
+        newBalance = (account["balance"] - amount)
+        account.update({"balance": newBalance})
+        return '{"origin": {"id":"'+str(id)+'", "balance":'+str(newBalance)+'}}', 201
 
-    account.update({"balance": amount})
-    return jsonify({"destination": {"id": destination, "balance": amount}}), 201
+
+    # Transfer from existing and non-existing account
+    elif eventType.lower() == 'transfer':
+        origin = int(requestData["origin"])
+        originAccount = get_account(origin)
+        if originAccount is None:
+            return "0", 404
+
+        amount = int(requestData["amount"])
+        newBalance = (originAccount["balance"] - amount)
+        originAccount.update({"balance": newBalance})
+
+        destination = int(requestData["destination"])
+        destinAccount = get_account(destination)
+
+        if destinAccount is None:
+            accounts.append({'account_id': destinAccount, 'balance': amount})
+            return '{"origin": {"id":"'+str(origin)+'", "balance":'+str(newBalance)+'}, "destination": {"id":"'+str(destination)+'", "balance":'+str(amount)+'}}', 201
+
+        originAccount.update({"balance": amount})
+        return '{"origin": {"id":"'+str(origin)+'", "balance":'+str(amount)+'}, "destination": {"id":"'+str(destinAccount)+'", "balance":'+str(newBalance)+'}}', 201
+    return "0"
+
 
 
 # Get Account ID
